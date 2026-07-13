@@ -1,10 +1,10 @@
 """
 video_emotion.py
 -----------------
-ערוץ הוידאו — זיהוי רגש מהבעות פנים בזמן אמת.
-משתמש ב-OpenCV לפתיחת המצלמה וב-DeepFace לניתוח הרגש.
+Video channel - real-time emotion recognition from facial expressions.
+Uses OpenCV to open the camera and DeepFace to analyze the emotion.
 
-שימוש:
+Usage:
     detector = VideoEmotionDetector()
     detector.open()
     while True:
@@ -23,32 +23,32 @@ from fusion import EMOTION_LABELS, EMOTION_COLORS, deepface_to_probs
 
 class VideoEmotionDetector:
     """
-    מזהה רגש מתמונת מצלמה בזמן אמת.
+    Detects emotion from a camera image in real time.
 
-    DeepFace רץ כל analyze_every פריימים (לא כל פריים — כדי לא להאט).
-    בין ריצות DeepFace מוחזרת התוצאה האחרונה.
+    DeepFace runs every `analyze_every` frames (not every frame - to avoid slowdown).
+    Between DeepFace runs, the last result is returned.
     """
 
-    def __init__(self, camera_index: int = 0, analyze_every: int = 8):
+    def __init__(self, camera_index: int = 0, analyze_every: int = 8,
+                 detector_backend: str = 'opencv'):
         """
-        camera_index:  0 = מצלמה ראשית, 1 = מצלמה שנייה וכו׳
-        analyze_every: הרץ DeepFace כל N פריימים
+        camera_index:     0 = primary camera, 1 = second camera, etc.
+        analyze_every:    run DeepFace every N frames
+        detector_backend: face detector. 'retinaface' = accurate, 'ssd'/'opencv' = fast
         """
-        self.camera_index   = camera_index
-        self.analyze_every  = analyze_every
+        self.camera_index     = camera_index
+        self.analyze_every    = analyze_every
+        self.detector_backend = detector_backend
         self.cap            = None
         self.frame_count    = 0
 
-        # תוצאה אחרונה — מוחזרת בין ריצות DeepFace
+        # Last result - returned between DeepFace runs.
         self.last_emotion = 'neutral'
         self.last_conf    = 0.0
         self.last_probs   = np.ones(7) / 7.0
 
-    # ──────────────────────────────────────────────
-    # פתיחה / סגירה
-    # ──────────────────────────────────────────────
     def open(self) -> bool:
-        """פותח את המצלמה. מחזיר True אם הצליח."""
+        """Open the camera. Returns True on success."""
         self.cap = cv2.VideoCapture(self.camera_index)
         if not self.cap.isOpened():
             print(f"❌ לא ניתן לפתוח מצלמה {self.camera_index}")
@@ -57,30 +57,24 @@ class VideoEmotionDetector:
         return True
 
     def release(self):
-        """משחרר את המצלמה."""
+        """Release the camera."""
         if self.cap:
             self.cap.release()
             self.cap = None
 
-    # ──────────────────────────────────────────────
-    # קריאת פריים
-    # ──────────────────────────────────────────────
     def read_frame(self):
         """
-        קורא פריים אחד מהמצלמה.
-        מחזיר: (ret: bool, frame: np.ndarray)
+        Read a single frame from the camera.
+        Returns: (ret: bool, frame: np.ndarray)
         """
         if self.cap is None:
             return False, None
         return self.cap.read()
 
-    # ──────────────────────────────────────────────
-    # ניתוח רגש
-    # ──────────────────────────────────────────────
     def analyze_frame(self, frame: np.ndarray) -> tuple:
         """
-        מנתח פריים ומחזיר רגש, ביטחון, וקטור הסתברויות.
-        DeepFace רץ רק כל analyze_every פריימים.
+        Analyze a frame and return emotion, confidence, and a probability vector.
+        DeepFace only runs every `analyze_every` frames.
 
         Returns:
             (emotion_str, confidence_float, probs_array)
@@ -92,6 +86,7 @@ class VideoEmotionDetector:
                 result = DeepFace.analyze(
                     frame,
                     actions=['emotion'],
+                    detector_backend=self.detector_backend,
                     enforce_detection=False,
                     silent=True
                 )
@@ -100,17 +95,14 @@ class VideoEmotionDetector:
                 self.last_conf    = emotion_dict[self.last_emotion]
                 self.last_probs   = deepface_to_probs(emotion_dict)
             except Exception:
-                pass   # אם לא זוהו פנים — נשמרת התוצאה האחרונה
+                pass   # no face detected - keep the last result
 
         return self.last_emotion, self.last_conf, self.last_probs.copy()
 
-    # ──────────────────────────────────────────────
-    # ציור על הפריים
-    # ──────────────────────────────────────────────
     def draw_on_frame(self, frame: np.ndarray) -> np.ndarray:
         """
-        מוסיף תווית רגש על הפריים (BGR).
-        מחזיר עותק של הפריים עם הכיתוב.
+        Draw the emotion label onto the frame (BGR).
+        Returns a copy of the frame with the caption.
         """
         color_hex = EMOTION_COLORS.get(self.last_emotion, '#FFFFFF')
         r = int(color_hex[1:3], 16)
@@ -128,7 +120,7 @@ class VideoEmotionDetector:
 
 
 # ─────────────────────────────────────────────────────────────
-# הרצה עצמאית (בדיקה)
+# Standalone run (for testing this channel alone)
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     detector = VideoEmotionDetector(analyze_every=8)
